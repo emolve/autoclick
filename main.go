@@ -2,13 +2,13 @@ package main
 
 import (
 	"autoclick/pkg/adb"
-	"autoclick/pkg/mail"
+	"autoclick/pkg/notification"
+	win "autoclick/pkg/windows"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows/svc"
-	"golang.org/x/sys/windows/svc/eventlog"
 	"io"
 	"math/rand"
 	"net/http"
@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -26,90 +25,39 @@ var (
 )
 
 const (
-	Morning = "auto_on"
-	Night   = "auto_off"
-)
+	LogDir = "C:\\Users\\Administrator\\Documents\\AutoClick\\"
 
-const (
-	logDir = "C:\\Users\\Administrator\\Documents\\AutoClick\\"
-	//logFile = "log_test.txt"
+	//  对应构建名称
+
+	ModelMorning = "auto_on"
+	ModelNight   = "auto_off"
 
 	DEBUG  = "DEBUG"
 	NORMAL = "NORMAL"
 	ACTUAL = "ACTUAL"
 )
 
-type myService struct {
-	logger *logrus.Logger
-	mutex  sync.Mutex
-	mode   string
-}
-
-func (m *myService) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
-
-	m.logger.Info("start mode: ", m.mode)
-	// Open the Windows event log
-	el, err := eventlog.Open("autoClickService")
-	if err != nil {
-		m.logger.WithError(err).Error("failed to open event log")
-		return
-	}
-	defer el.Close()
-
-	// 初始化服务状态
-	changes <- svc.Status{State: svc.StartPending}
-
-	// 启动服务
-	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
-
-	// 处理系统事件
-	for {
-		select {
-		case c := <-r:
-			switch c.Cmd {
-			case svc.Stop, svc.Shutdown:
-				// 停止服务
-				changes <- svc.Status{State: svc.StopPending}
-				m.logger.Info("-----------------------Stopping service-----------------------")
-				return
-			default:
-				//debug.Log.(fmt.Sprintf("unexpected control request #%d", c))
-			}
-		case <-time.After(10 * time.Second):
-			// 每隔10秒钟执行一次任务
-			go func() {
-				if !m.mutex.TryLock() {
-					// 锁获取失败，直接返回
-					return
-				}
-				defer m.mutex.Unlock()
-				m.doTask()
-			}()
-		}
-	}
-}
-
-func (m *myService) doTask() {
+func myTask(mode string, logger *logrus.Logger) {
 	var ticker *time.Ticker
 	var targetHour, targetMinute int
 	// 执行任务的逻辑
 	switch runModel {
-	case Morning:
+	case ModelMorning:
 		// 指定每天 8:40 执行任务
 		targetHour = 8
 		targetMinute = 40
-		m.logger.Info("执行上班任务")
-	case Night:
+		logger.Info("执行上班任务")
+	case ModelNight:
 		// 指定每天 18:10 执行任务
 		targetHour = 18
 		targetMinute = 10
-		m.logger.Info("执行下班任务")
+		logger.Info("执行下班任务")
 	default:
 		inAMinute := time.Now().Add(time.Second * 60)
 		// 获取小时和分钟
 		targetHour = inAMinute.Hour()
 		targetMinute = inAMinute.Minute()
-		m.logger.Info("执行其他任务,将在一分钟后执行")
+		logger.Info("执行其他任务,将在一分钟后执行")
 	}
 
 	// 获取当前时间
@@ -131,20 +79,20 @@ func (m *myService) doTask() {
 
 	// 等待指定时间后执行任务
 
-	switch m.mode {
+	switch mode {
 	case DEBUG:
 		ticker = time.NewTicker(time.Second * 5) // 延迟5s开始
-		m.logger.Info("距离下一次执行：", time.Second*5)
-		m.logger.Info("最终执行时间：", now.Add(time.Second*5))
+		logger.Info("距离下一次执行：", time.Second*5)
+		logger.Info("最终执行时间：", now.Add(time.Second*5))
 	case NORMAL:
 		ticker = time.NewTicker(duration) // 整点
-		m.logger.Info("距离下一次执行：", duration)
-		m.logger.Info("最终执行时间：", targetTime)
+		logger.Info("距离下一次执行：", duration)
+		logger.Info("最终执行时间：", targetTime)
 	case ACTUAL:
 		ticker = time.NewTicker(actual) // 偏移
-		m.logger.Info("本次偏移时间为：", off)
-		m.logger.Info("距离下一次执行：", actual)
-		m.logger.Info("最终执行时间：", targetTime.Add(off))
+		logger.Info("本次偏移时间为：", off)
+		logger.Info("距离下一次执行：", actual)
+		logger.Info("最终执行时间：", targetTime.Add(off))
 	}
 
 	select {
@@ -156,7 +104,7 @@ func (m *myService) doTask() {
 
 		id, err := adb.GetDeviceID()
 		if err != nil {
-			m.logger.Error("get devices id failed:", err)
+			logger.Error("get devices id failed:", err)
 		}
 		deviceID = *id
 
@@ -168,7 +116,7 @@ func (m *myService) doTask() {
 				break
 			}
 			if err != nil && err.Error() == "exit status 6" {
-				m.logger.Errorf("network checking failed :%v, try again later, times:%d", err, i)
+				logger.Errorf("network checking failed :%v, try again later, times:%d", err, i)
 				time.Sleep(time.Second * 3)
 			}
 		}
@@ -179,34 +127,34 @@ func (m *myService) doTask() {
 		}
 
 		// 发送点亮屏幕信号
-		m.logger.Info("1. power on")
+		logger.Info("1. power on")
 		err = exec.Command("cmd", "/c", "adb  shell input keyevent 26").Run()
 		// todo: 查看屏幕状态
 		// adb shell dumpsys window policy
-		m.logger.Info("2. back to home")
+		logger.Info("2. back to home")
 		err = exec.Command("cmd", "/c", "adb shell input tap 544 2270").Run() // home
 		time.Sleep(time.Second * 5)
-		m.logger.Info("3. click app")
+		logger.Info("3. click app")
 		err = exec.Command("cmd", "/c", "adb shell input tap 172 847").Run() // app
 		time.Sleep(time.Second * 10)
-		m.logger.Info("4. screen")
+		logger.Info("4. screen")
 		err = adb.Screen(deviceID)
-		m.logger.Info("5. back to home")
+		logger.Info("5. back to home")
 		err = exec.Command("cmd", "/c", "adb shell input tap 544 2270").Run() // home
 		time.Sleep(time.Second * 5)
-		m.logger.Info("6. view app history")
+		logger.Info("6. view app history")
 		err = exec.Command("cmd", "/c", "adb  shell input tap  276 2286").Run() // used app
 		time.Sleep(time.Second * 5)
-		m.logger.Info("7. delete app history")
+		logger.Info("7. delete app history")
 		err = exec.Command("cmd", "/c", "adb shell input tap 533 2044").Run() //close
 
 		// 输出执行结果
 		if err != nil {
-			m.logger.Error("adb operation failed", err)
+			logger.Error("adb operation failed", err)
 			return
 		} else {
 			mailSubject = "[successful] adb operation done"
-			m.logger.Info("adb operation done")
+			logger.Info("adb operation done")
 		}
 
 		// screen()
@@ -226,12 +174,12 @@ func main() {
 	// Create a new logger
 	localLogger := logrus.New()
 
-	err := os.MkdirAll(logDir, 0755)
+	err := os.MkdirAll(LogDir, 0755)
 	if err != nil {
 		// 处理创建目录时出现的错误
 	}
 	// Open a file for writing the log output
-	file, err := os.OpenFile(fmt.Sprintf("%s%s", logDir, logFile), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(fmt.Sprintf("%s%s", LogDir, logFile), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		localLogger.Fatal(err)
 	}
@@ -240,10 +188,12 @@ func main() {
 	// Set the logger output to the file
 	localLogger.SetOutput(file)
 	localLogger.Info("-----------------------Starting service-----------------------")
-	localLogger.Info("logging at: ", fmt.Sprintf("%s%s", logDir, logFile))
+	localLogger.Info("logging at: ", fmt.Sprintf("%s%s", LogDir, logFile))
 
 	// 注册服务
-	err = svc.Run("", &myService{logger: localLogger, mode: ACTUAL})
+	err = svc.Run("", win.InitService(ACTUAL, localLogger, myTask))
+
+	//err = svc.Run("", &myService{logger: localLogger, mode: ACTUAL})
 	if err != nil {
 		fmt.Printf("Failed to register service: %v", err)
 	}
@@ -321,6 +271,6 @@ func plusplus(subject string) {
 
 func send163Mail(subject string) error {
 	//err := SendMail("xxxx@163.com", "xxxx", "smtp.163.com", "25", "xxxx@163.com", "xxxx@163.com", subject, "11111")
-	err := mail.SendMail("13735599246@163.com", "xxx", "smtp.163.com", "25", "13735599246@163.com", "13735599246@163.com", subject, "11111")
+	err := notification.SendMail("13735599246@163.com", "xxx", "smtp.163.com", "25", "13735599246@163.com", "13735599246@163.com", subject, "11111")
 	return err
 }
