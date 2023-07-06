@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -18,8 +19,8 @@ func TestMail(t *testing.T) {
 
 }
 
-func TestScreen(t *testing.T) {
-
-	screen()
-
+func TestGetFormattedName(t *testing.T) {
+	name := "autoTest.exe"
+	formattedName := getFormattedName(name)
+	fmt.Println(formattedName)
 }

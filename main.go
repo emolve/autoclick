@@ -1,24 +1,42 @@
 package main
 
 import (
+	"autoclick/pkg/adb"
+	"autoclick/pkg/mail"
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/kbinani/screenshot"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
-	"gopkg.in/gomail.v2"
-	"image"
-	"image/png"
-	"io/ioutil"
+	"io"
 	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
-	"strconv"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
+)
+
+var (
+	runModel = getFormattedName(getProgramName())
+)
+
+const (
+	Morning = "auto_on"
+	Night   = "auto_off"
+)
+
+const (
+	logDir = "C:\\Users\\Administrator\\Documents\\AutoClick\\"
+	//logFile = "log_test.txt"
+
+	DEBUG  = "DEBUG"
+	NORMAL = "NORMAL"
+	ACTUAL = "ACTUAL"
 )
 
 type myService struct {
@@ -73,11 +91,26 @@ func (m *myService) Execute(args []string, r <-chan svc.ChangeRequest, changes c
 
 func (m *myService) doTask() {
 	var ticker *time.Ticker
-
+	var targetHour, targetMinute int
 	// 执行任务的逻辑
-	// 指定每天8:40执行任务
-	targetHour := 8
-	targetMinute := 40
+	switch runModel {
+	case Morning:
+		// 指定每天 8:40 执行任务
+		targetHour = 8
+		targetMinute = 40
+		m.logger.Info("执行上班任务")
+	case Night:
+		// 指定每天 18:10 执行任务
+		targetHour = 18
+		targetMinute = 10
+		m.logger.Info("执行下班任务")
+	default:
+		inAMinute := time.Now().Add(time.Second * 60)
+		// 获取小时和分钟
+		targetHour = inAMinute.Hour()
+		targetMinute = inAMinute.Minute()
+		m.logger.Info("执行其他任务,将在一分钟后执行")
+	}
 
 	// 获取当前时间
 	now := time.Now()
@@ -117,9 +150,17 @@ func (m *myService) doTask() {
 	select {
 	case <-ticker.C:
 
-		var mailSubject string
-		// 网络检测
 		var err error
+		var deviceID string
+		var mailSubject string
+
+		id, err := adb.GetDeviceID()
+		if err != nil {
+			m.logger.Error("get devices id failed:", err)
+		}
+		deviceID = *id
+
+		// 网络检测
 		for i := 0; i < 10; i++ {
 
 			err = exec.Command("cmd", "/c", "adb shell curl www.baidu.com").Run() // net check
@@ -148,13 +189,15 @@ func (m *myService) doTask() {
 		m.logger.Info("3. click app")
 		err = exec.Command("cmd", "/c", "adb shell input tap 172 847").Run() // app
 		time.Sleep(time.Second * 10)
-		m.logger.Info("4. back to home")
+		m.logger.Info("4. screen")
+		err = adb.Screen(deviceID)
+		m.logger.Info("5. back to home")
 		err = exec.Command("cmd", "/c", "adb shell input tap 544 2270").Run() // home
 		time.Sleep(time.Second * 5)
-		m.logger.Info("5. view app history")
+		m.logger.Info("6. view app history")
 		err = exec.Command("cmd", "/c", "adb  shell input tap  276 2286").Run() // used app
 		time.Sleep(time.Second * 5)
-		m.logger.Info("6. delete app history")
+		m.logger.Info("7. delete app history")
 		err = exec.Command("cmd", "/c", "adb shell input tap 533 2044").Run() //close
 
 		// 输出执行结果
@@ -173,16 +216,12 @@ func (m *myService) doTask() {
 
 }
 
-const (
-	logDir  = "C:\\Users\\Administrator\\Documents\\AutoClick\\"
-	logFile = "log.txt"
-
-	DEBUG  = "DEBUG"
-	NORMAL = "NORMAL"
-	ACTUAL = "ACTUAL"
-)
-
 func main() {
+
+	// get logFile Name
+	programName := getProgramName()
+	formattedName := getFormattedName(programName)
+	logFile := fmt.Sprintf("log_%s.txt", formattedName)
 
 	// Create a new logger
 	localLogger := logrus.New()
@@ -210,6 +249,25 @@ func main() {
 	}
 
 }
+func getProgramName() string {
+	// 获取命令行参数
+	args := os.Args
+	// 第一个参数是程序的名称
+	programPath := args[0]
+	// 提取文件的基本名称
+	name := filepath.Base(programPath)
+	return name
+}
+
+func getFormattedName(name string) string {
+	fileNameWithoutExt := strings.TrimSuffix(name, ".exe")
+	// 使用正则表达式将驼峰式命名转换为下划线格式
+	reg := regexp.MustCompile("([a-z0-9])([A-Z])")
+	formattedName := reg.ReplaceAllString(fileNameWithoutExt, "${1}_${2}")
+	formattedName = strings.ToLower(formattedName)
+	return formattedName
+}
+
 func addRandomTime(duration time.Duration) (randomTime time.Duration, actual time.Duration) {
 	if duration < 5*time.Minute {
 		// Add a random time between 0 and 3 minutes
@@ -257,50 +315,12 @@ func plusplus(subject string) {
 
 	fmt.Println("response Status:", resp.Status)
 	fmt.Println("response Headers:", resp.Header)
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	fmt.Println("response Body:", string(body))
 }
 
 func send163Mail(subject string) error {
-	err := SendMail("xxxx@163.com", "xxxx", "smtp.163.com", "25", "xxxx@163.com", "xxxx@163.com", subject, "11111")
+	//err := SendMail("xxxx@163.com", "xxxx", "smtp.163.com", "25", "xxxx@163.com", "xxxx@163.com", subject, "11111")
+	err := mail.SendMail("13735599246@163.com", "xxx", "smtp.163.com", "25", "13735599246@163.com", "13735599246@163.com", subject, "11111")
 	return err
-}
-
-func SendMail(userName, authCode, host, portStr, mailTo, sendName string, subject, body string) error {
-	port, _ := strconv.Atoi(portStr)
-	m := gomail.NewMessage()
-	m.SetHeader("From", m.FormatAddress(userName, sendName))
-	m.SetHeader("To", mailTo)
-	m.SetHeader("Subject", subject)
-	m.SetBody("text/html", body)
-	//m.Embed("C:\\Users\\Administrator\\Pictures\\uToolsWallpapers\\wallhaven-yje5gg.jpg") // 图片路径
-	//m.SetBody("text/html", `<img src="cid:wallhaven-yje5gg.jpg" alt="My image" />`)       //设置邮件正文
-
-	d := gomail.NewDialer(host, port, userName, authCode)
-	err := d.DialAndSend(m)
-	return err
-}
-
-func screen() {
-	//使用 GetDisplayBounds获取指定屏幕显示范围，全屏截图
-	bounds := screenshot.GetDisplayBounds(0)
-	img, err := screenshot.CaptureRect(bounds)
-	if err != nil {
-		panic(err)
-	}
-	//拼接图片名
-	t := time.Now().Unix()
-	tt := strconv.Itoa(int(t)) + ".png"
-
-	save(img, tt)
-}
-
-// save *image.RGBA to filePath with PNG format.
-func save(img *image.RGBA, filePath string) {
-	file, err := os.Create(filePath)
-	if err != nil {
-		panic(err)
-	}
-	defer file.Close()
-	png.Encode(file, img)
 }
