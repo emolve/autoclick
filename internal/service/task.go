@@ -111,8 +111,16 @@ func DingTask(mode string, logger *logrus.Logger) {
 		}
 		if err != nil {
 			mailSubject = "[failed] network failed"
-			notification.Plusplus(global.NotificationSetting.PlusPlus, mailSubject)
-			notification.Send163Mail(global.NotificationSetting.Mail, MailTo, mailSubject)
+			err = notification.Plusplus(global.NotificationSetting.PlusPlus, mailSubject)
+			if err != nil {
+				logger.Error("[notification] plus failed", err)
+				return
+			}
+			err = notification.Send163Mail(global.NotificationSetting.Mail, MailTo, mailSubject)
+			if err != nil {
+				logger.Error("[notification] mail failed", err)
+				return
+			}
 		}
 
 		// 发送点亮屏幕信号
@@ -146,8 +154,16 @@ func DingTask(mode string, logger *logrus.Logger) {
 			logger.Info("adb operation done")
 		}
 
-		notification.Plusplus(global.NotificationSetting.PlusPlus, mailSubject)
-		notification.Send163Mail(global.NotificationSetting.Mail, MailTo, mailSubject)
+		err = notification.Plusplus(global.NotificationSetting.PlusPlus, mailSubject)
+		if err != nil {
+			logger.Error("[notification] plus failed", err)
+			return
+		}
+		err = notification.Send163Mail(global.NotificationSetting.Mail, MailTo, mailSubject)
+		if err != nil {
+			logger.Error("[notification] mail failed", err)
+			return
+		}
 	}
 
 }
