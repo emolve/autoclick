@@ -18,7 +18,6 @@ const (
 )
 
 var (
-	logFile     string
 	localLogger *logrus.Logger
 )
 
@@ -34,7 +33,6 @@ func init() {
 func main() {
 
 	localLogger.Info("-----------------------Starting service-----------------------")
-	localLogger.Info("logging at: ", fmt.Sprintf("%s%s", LogDir, logFile))
 
 	// 注册服务
 	err := svc.Run("", win.InitService(global.AppSetting.RunMode, localLogger, service.DingTask))
@@ -62,7 +60,7 @@ func setupSetting() error {
 
 func setupLogger() *logrus.Logger {
 	// get logFile Name
-	logFile = fmt.Sprintf("log_%s.txt", project.GetFormattedName(project.GetProgramName()))
+	logFile := fmt.Sprintf("log_%s.txt", project.GetFormattedName(project.GetProgramName()))
 
 	// Create a new logger
 	localLogger = logrus.New()
