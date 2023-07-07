@@ -1,0 +1,5 @@
+App:
+  RunMode: debug
+Notification:
+  Mail: "test"
+  PlusPlus: "test"

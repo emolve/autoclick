@@ -1,17 +1,15 @@
 package main
 
 import (
+	"autoclick/global"
 	"autoclick/pkg/adb"
 	"autoclick/pkg/notification"
+	"autoclick/pkg/setting"
 	win "autoclick/pkg/windows"
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows/svc"
-	"io"
 	"math/rand"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,9 +30,11 @@ const (
 	ModelMorning = "auto_on"
 	ModelNight   = "auto_off"
 
-	DEBUG  = "DEBUG"
-	NORMAL = "NORMAL"
-	ACTUAL = "ACTUAL"
+	DEBUG  = "debug"
+	NORMAL = "normal"
+	ACTUAL = "actual"
+
+	MailTo = "13735599246@163.com"
 )
 
 func myTask(mode string, logger *logrus.Logger) {
@@ -122,8 +122,8 @@ func myTask(mode string, logger *logrus.Logger) {
 		}
 		if err != nil {
 			mailSubject = "[failed] network failed"
-			plusplus(mailSubject)
-			send163Mail(mailSubject)
+			notification.Plusplus(global.NotificationSetting.PlusPlus, mailSubject)
+			notification.Send163Mail(global.NotificationSetting.Mail, MailTo, mailSubject)
 		}
 
 		// 发送点亮屏幕信号
@@ -157,11 +157,23 @@ func myTask(mode string, logger *logrus.Logger) {
 			logger.Info("adb operation done")
 		}
 
-		// screen()
-		plusplus(mailSubject)
-		send163Mail(mailSubject)
+		notification.Plusplus(global.NotificationSetting.PlusPlus, mailSubject)
+		notification.Send163Mail(global.NotificationSetting.Mail, MailTo, mailSubject)
 	}
 
+}
+
+func init() {
+	err := setupSetting()
+	if err != nil {
+
+		//log.Fatalf("init.setupSetting err: %v", err)
+		localLogger := logrus.New()
+		file, _ := os.OpenFile(fmt.Sprintf("%s%s", LogDir, "123.txt"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		localLogger.SetOutput(file)
+		localLogger.Info(err)
+
+	}
 }
 
 func main() {
@@ -191,7 +203,8 @@ func main() {
 	localLogger.Info("logging at: ", fmt.Sprintf("%s%s", LogDir, logFile))
 
 	// 注册服务
-	err = svc.Run("", win.InitService(ACTUAL, localLogger, myTask))
+	//err = svc.Run("", win.InitService(global.AppSetting.RunMode, localLogger, myTask))
+	err = svc.Run("", win.InitService(global.AppSetting.RunMode, localLogger, myTask))
 
 	//err = svc.Run("", &myService{logger: localLogger, mode: ACTUAL})
 	if err != nil {
@@ -238,39 +251,18 @@ func addRandomTime(duration time.Duration) (randomTime time.Duration, actual tim
 	return randomTime, duration
 }
 
-func plusplus(subject string) {
-	s := struct {
-		Token    string `json:"token"`
-		Title    string `json:"title"`
-		Content  string `json:"content"`
-		Template string `json:"template"`
-	}{
-		Token:    "xxxxx",
-		Title:    subject,
-		Content:  time.Now().String() + "打卡成功",
-		Template: "html",
-	}
-	jsonStr, err := json.Marshal(s)
-	url := "http://www.pushplus.plus/send"
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonStr))
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
+func setupSetting() error {
+	setting, err := setting.NewSetting()
 	if err != nil {
-		panic(err)
+		return err
 	}
-	defer resp.Body.Close()
-
-	fmt.Println("response Status:", resp.Status)
-	fmt.Println("response Headers:", resp.Header)
-	body, _ := io.ReadAll(resp.Body)
-	fmt.Println("response Body:", string(body))
-}
-
-func send163Mail(subject string) error {
-	//err := SendMail("xxxx@163.com", "xxxx", "smtp.163.com", "25", "xxxx@163.com", "xxxx@163.com", subject, "11111")
-	err := notification.SendMail("13735599246@163.com", "xxx", "smtp.163.com", "25", "13735599246@163.com", "13735599246@163.com", subject, "11111")
-	return err
+	err = setting.ReadSection("Notification", &global.NotificationSetting)
+	if err != nil {
+		return err
+	}
+	err = setting.ReadSection("App", &global.AppSetting)
+	if err != nil {
+		return err
+	}
+	return nil
 }

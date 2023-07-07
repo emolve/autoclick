@@ -19,3 +19,8 @@ func SendMail(userName, authCode, host, portStr, mailTo, sendName string, subjec
 	err := d.DialAndSend(m)
 	return err
 }
+
+func Send163Mail(token, mailTo, subject string) error {
+	err := SendMail(mailTo, token, "smtp.163.com", "25", mailTo, mailTo, subject, "11111")
+	return err
+}
